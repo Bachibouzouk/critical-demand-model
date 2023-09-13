@@ -512,13 +512,12 @@ def run_simulation(df_costs, data, settings):
     # Save the results
     asset_results = asset_results[RESULTS_COLUMN_NAMES]
     asset_results.to_csv(f"results_{case}.csv")
-
-    NPV = ((asset_results.annual_costs.sum() + asset_results.cash_flow.sum()) / CRF) + project_planning_cost
+    NPV = ((asset_results.annual_costs.sum() + asset_results.cash_flow.sum()) / CRF)*(1/year_fraction) + df_costs["capex_fix"]["project"]
 
     # supplied demand
-    total_demand = sequences_demand.sum(axis=0) + sequences_critical_demand.sum(axis=0)
-    Supplied_critical_demand = sequences_critical_demand.sum(axis=0)
-    Supplied_non_critical_demand = sequences_demand.sum(axis=0)
+    total_demand = (sequences_demand.sum(axis=0) + sequences_critical_demand.sum(axis=0)) * (1/year_fraction)
+    Supplied_critical_demand = sequences_critical_demand.sum(axis=0) * (1/year_fraction)
+    Supplied_non_critical_demand = sequences_demand.sum(axis=0) * (1/year_fraction)
 
     # Levelized cost of electricity in the system in currency's Cent per kWh.
     lcoe = 100 * (NPV * CRF) / total_demand
@@ -555,12 +554,12 @@ def run_simulation(df_costs, data, settings):
         / non_critical_demand[sequences_demand.index].sum(axis=0)
     )
 
-    original_demand = critical_demand[sequences_critical_demand.index].sum(
+    original_demand = (critical_demand[sequences_critical_demand.index].sum(
         axis=0
-    ) + non_critical_demand[sequences_demand.index].sum(axis=0)
+    ) + non_critical_demand[sequences_demand.index].sum(axis=0)) * (1/year_fraction)
 
-    total_opex_costs = asset_results.total_opex_costs.sum()
-    first_investment= asset_results.first_investment.sum()+  project_planning_cost
+    total_opex_costs = asset_results.total_opex_costs.sum()*(1/year_fraction)
+    first_investment= asset_results.first_investment.sum()*(1/year_fraction) + df_costs["capex_fix"]["project"]
     overall_peak_demand = sequences_demand.max() + sequences_critical_demand.max()
 
     ##########################################################################
@@ -624,7 +623,7 @@ def run_simulation(df_costs, data, settings):
     print(f"NPV:\t\t {NPV:.2f} USD")
     print(f"Total opex costs :\t\t {total_opex_costs:.2f} USD/year")
     print(f"First investment :\t\t {first_investment:.2f} USD")
-    print(f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*CRF:.2f} USD/year")
+    print(f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*(1/year_fraction):.2f} USD/year")
     print(f"RES:\t\t {res:.0f}%")
     print(f"Excess:\t\t {excess_rate:.1f}% of the total production")
     print(f"Supplied demand:\t\t {total_demand:.1f} kWh")
@@ -653,8 +652,8 @@ def run_simulation(df_costs, data, settings):
                 children=[
                     html.P(f"Peak Demand:\t {sequences_demand.max():.1f} kW"),
                     html.P(f"LCOE:\t\t {lcoe:.2f} cent/kWh", title=help_lcoe),
-                    html.P(f"First investment :\t\t {asset_results.first_investment.sum():.2f} USD", title="It is the sum of the product of optimized capacity and annualized costs of each asset"),
-                    html.P(f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*CRF:.2f} USD/year"),
+                    html.P(f"First investment :\t\t {asset_results.first_investment.sum()*(1/year_fraction):.2f} USD", title="It is the sum of the product of optimized capacity and annualized costs of each asset"),
+                    html.P(f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*(1/year_fraction):.2f} USD/year"),
                     html.P(f"RES:\t\t {res:.0f}%"),
                     html.P(f"Excess:\t\t {excess_rate:.1f}% of the total production"),
                     html.P(
