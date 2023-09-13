@@ -84,8 +84,8 @@ RESULTS_COLUMN_NAMES = [
 #AA: the model still read these inputs below, need to be read from input excel sheet!!
 
 def other_costs():
-    variable_cost_diesel_genset = 0.025  # currency/kWh #ADN: how caculated, doese included opex costs per kWh/a in ??
-    diesel_cost = 1  # currency/l
+    variable_cost_diesel_genset = 0.065  # currency/kWh #ADN: how caculated, doese included opex costs per kWh/a in ??
+    diesel_cost = 0.65  # currency/l
     diesel_density = 0.846  # kg/l
     diesel_lhv = 11.83  # kWh/kg
     return variable_cost_diesel_genset, diesel_cost, diesel_density, diesel_lhv
@@ -94,7 +94,7 @@ def other_costs():
 case_D = "D"
 case_DBPV = "DBPV"
 case_BPV = "BPV"
-project_planning_cost = 5000
+
 
 def run_simulation(df_costs, data, settings):
 
@@ -179,9 +179,9 @@ def run_simulation(df_costs, data, settings):
     # the given minimum and maximum loads, which represent the fraction
     # of the optimal capacity obtained from the optimization.
 
-    diesel_genset_efficiency = 0.33
+    diesel_genset_efficiency = 0.29
     if case in (case_D, case_DBPV):
-        min_load = 0.30
+        min_load = 0
         max_load = 1
         diesel_genset = solph.components.Converter(
             label="diesel_genset",
@@ -250,8 +250,8 @@ def run_simulation(df_costs, data, settings):
             min_storage_level=settings.storage_soc_min,
             max_storage_level=settings.storage_soc_max,
             loss_rate=0.01,
-            inflow_conversion_factor=0.9,
-            outflow_conversion_factor=0.9,
+            inflow_conversion_factor=0.95,
+            outflow_conversion_factor=0.95,
             invest_relation_input_capacity=1,
             invest_relation_output_capacity=0.5,  # fixes the input flow investment to the output flow investment
         )
