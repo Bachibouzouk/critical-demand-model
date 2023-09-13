@@ -139,7 +139,8 @@ def run_simulation(df_costs, data, settings):
     # -------------------- BUSES --------------------
     # Create electricity and diesel buses.
     b_el_ac = solph.Bus(label="electricity_ac")
-    b_el_dc = solph.Bus(label="electricity_dc")
+    if case in (case_BPV, case_DBPV):
+        b_el_dc = solph.Bus(label="electricity_dc")
     if case in (case_D, case_DBPV):
         b_diesel = solph.Bus(label="diesel")
 
@@ -203,39 +204,40 @@ def run_simulation(df_costs, data, settings):
     #import ipdb;ipdb.set_trace()
     # The rectifier assumed to have a fixed efficiency of 98%.
     # its cost already included in the PV cost investment
-    rectifier = solph.components.Converter(
-        label="rectifier",
-        inputs={
-            b_el_ac: solph.Flow(
-                nominal_value=solph.Investment(
-                    ep_costs=epc.rectifier * n_days / n_days_in_year
-                ),
-                variable_costs=5,
-            )
-        },
-        outputs={b_el_dc: solph.Flow()},
-        conversion_factors={
-            b_el_dc: 0.98,
-        },
-    )
+    if case in (case_BPV, case_DBPV):
+        rectifier = solph.components.Converter(
+            label="rectifier",
+            inputs={
+                b_el_ac: solph.Flow(
+                    nominal_value=solph.Investment(
+                        ep_costs=epc.rectifier * n_days / n_days_in_year
+                    ),
+                    variable_costs=5,
+                )
+            },
+            outputs={b_el_dc: solph.Flow()},
+            conversion_factors={
+                b_el_dc: 0.98,
+            },
+        )
 
-    # The inverter assumed to have a fixed efficiency of 98%.
-    # its cost already included in the PV cost investment
-    inverter = solph.components.Converter(
-        label="inverter",
-        inputs={
-            b_el_dc: solph.Flow(
-                nominal_value=solph.Investment(
-                    ep_costs=epc.inverter * n_days / n_days_in_year
-                ),
-                variable_costs=0, # has to be fits input sheet
-            )
-        },
-        outputs={b_el_ac: solph.Flow()},
-        conversion_factors={
-            b_el_ac: 0.98,
-        },
-    )
+        # The inverter assumed to have a fixed efficiency of 98%.
+        # its cost already included in the PV cost investment
+        inverter = solph.components.Converter(
+            label="inverter",
+            inputs={
+                b_el_dc: solph.Flow(
+                    nominal_value=solph.Investment(
+                        ep_costs=epc.inverter * n_days / n_days_in_year
+                    ),
+                    variable_costs=0, # has to be fits input sheet
+                )
+            },
+            outputs={b_el_ac: solph.Flow()},
+            conversion_factors={
+                b_el_ac: 0.98,
+            },
+        )
 
     # -------------------- STORAGE --------------------
 
@@ -280,16 +282,20 @@ def run_simulation(df_costs, data, settings):
         },
     )
 
-    excess_el = solph.components.Sink(
-        label="excess_el",
-        inputs={b_el_dc: solph.Flow(variable_costs=1e9)},
-    )
+    if case in (case_BPV, case_DBPV):
+        excess_el = solph.components.Sink(
+            label="excess_el",
+            inputs={b_el_ac: solph.Flow(variable_costs=0),
+                    b_el_dc: solph.Flow()},
+        )
+    else:
+        excess_el = solph.components.Sink(
+            label="excess_el",
+            inputs={b_el_ac: solph.Flow(variable_costs=0)},
+        )
 
     energy_system.add(
-        b_el_dc,
         b_el_ac,
-        inverter,
-        rectifier,
         demand_el,
         critical_demand_el,
         excess_el,
@@ -298,14 +304,20 @@ def run_simulation(df_costs, data, settings):
     # Add all objects to the energy system.
     if case == case_BPV:
         energy_system.add(
+            b_el_dc,
             pv,
             battery,
+            inverter,
+            rectifier,
         )
 
     if case == case_DBPV:
         energy_system.add(
+            b_el_dc,
             pv,
             battery,
+            inverter,
+            rectifier,
             diesel_source,
             diesel_genset,
             b_diesel,
@@ -417,19 +429,20 @@ def run_simulation(df_costs, data, settings):
 
     # Hourly profiles for excess ac and dc electricity production.
     sequences_excess = results_excess_el["sequences"][
-        (("electricity_dc", "excess_el"), "flow")
+        (("electricity_ac", "excess_el"), "flow")
     ]
 
-    sequences_inverter = results_inverter["sequences"][
-        (("inverter", "electricity_ac"), "flow")
-    ]
+    if case in (case_BPV, case_DBPV):
+        sequences_inverter = results_inverter["sequences"][
+            (("inverter", "electricity_ac"), "flow")
+        ]
 
-    sequences_rectifier = results_rectifier["sequences"][
-        (("rectifier", "electricity_dc"), "flow")
-    ]
+        sequences_rectifier = results_rectifier["sequences"][
+            (("rectifier", "electricity_dc"), "flow")
+        ]
 
-    asset_results.loc["inverter", "total_flow"] = sequences_inverter.sum()
-    asset_results.loc["rectifier", "total_flow"] = sequences_rectifier.sum()
+        asset_results.loc["inverter", "total_flow"] = sequences_inverter.sum()
+        asset_results.loc["rectifier", "total_flow"] = sequences_rectifier.sum()
 
     if case in (case_D, case_DBPV):
         # -------------------- SCALARS (STATIC) --------------------
