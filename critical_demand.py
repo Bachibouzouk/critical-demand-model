@@ -827,7 +827,7 @@ if __name__ == "__main__":
         nargs="?",
         type=str,
         help="path to the input file",
-        default=os.path.join(current_directory, "input_case.xlsx"),
+        default=os.path.join(current_directory, "input_case_usungwe.xlsx"),
     )
 
     args = vars(parser.parse_args())
@@ -909,7 +909,7 @@ if __name__ == "__main__":
                 children=[
                     html.P(f"{param.title()}: {settings[param]}")
                     for param in settings.index
-                    if param != "port"
+                    if param is not None
                 ],
                 style={"display": "flex", "justify-content": "space-evenly"},
             ),
