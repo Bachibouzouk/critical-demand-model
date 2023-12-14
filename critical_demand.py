@@ -59,6 +59,7 @@ from dash import html
 from dash import dash_table
 from dash.dependencies import Input, Output, State
 import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 
 from utils import read_input_file, capex_from_investment, encode_image_file
 
@@ -677,6 +678,140 @@ def run_simulation(df_costs, data, settings):
     )
 
 
+def electricity_flow_fig(results):
+
+    sequences = solph.views.convert_keys_to_strings(results)
+
+    sequences_demand = sequences[("electricity_ac", "electricity_demand")]["sequences"]
+    sequences_critical_demand = sequences[("electricity_ac", "electricity_critical_demand")]["sequences"]
+    sequences_pv = sequences[("pv", "electricity_dc")]["sequences"]
+    sequences_charge = sequences[("electricity_dc", "battery")]["sequences"]
+    sequences_discharge = sequences[("battery", "electricity_dc")]["sequences"]
+    sequences_diesel_genset = sequences[("diesel_genset", "electricity_ac")]["sequences"]
+    sequences_excess_el = sequences[("electricity_ac", "excess_el")]["sequences"]
+    sequences_soc = sequences[("battery", "None")]["sequences"]
+    battery_capacity = sequences[("battery", "None")]["scalars"].invest
+
+    line_shape = "vh"
+    fig = make_subplots(rows=2, cols=1)
+    fig.add_trace(
+        go.Scatter(
+            x=sequences_demand.flow.index,
+            y=sequences_critical_demand.flow.values,
+            name="critical demand",
+            line_color="#f72a2a",
+            line_shape=line_shape
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=sequences_demand.flow.index,
+            y=sequences_demand.flow.values,
+            name="non-critical demand",
+            line_color="#4ecf32",
+            line_shape=line_shape
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=sequences_demand.flow.index,
+            y=sequences_pv.flow.values,
+            name="PV generation",
+            line_color="#cbd62d",
+            line_shape=line_shape
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=sequences_demand.flow.index,
+            y=sequences_charge.flow.values,
+            name="storage charge",
+            line_color="#2899a6",
+            line_shape=line_shape
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=sequences_demand.flow.index,
+            y=sequences_discharge.flow.values,
+            name="storage discharge",
+            line_color="#1364d6",
+            line_shape=line_shape
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=sequences_demand.flow.index,
+            y=sequences_diesel_genset.flow.values,
+            name="diesel genset generation",
+            line_color="#050505",
+            line_shape=line_shape
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=sequences_demand.flow.index,
+            y=sequences_excess_el.flow.values,
+            name="Excess generation",
+            line_color="#964B00",
+            line_shape=line_shape
+        ),
+        row=1,
+        col=1
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=sequences_soc.index,
+            y=sequences_soc.storage_content.values/battery_capacity,
+            line_color="#2596be",
+            showlegend=False,
+            line_shape=line_shape
+        ),
+        row=2,
+        col=1
+    )
+    layout = dict(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=1000,
+        width=1200,
+    )
+
+
+    fig.update_layout(**layout)
+    axis_settings = dict(
+        mirror=True,
+        ticks='outside',
+        tickwidth=1.5,
+        showline=True,
+        linewidth=1.5,
+        linecolor='black',
+        zeroline=True, zerolinewidth=1.5, zerolinecolor='black',
+
+    )
+    fig.update_xaxes(range=[sequences_soc.index[0], sequences_soc.index[8*24]], **axis_settings)
+    fig.update_xaxes(row=1,showticklabels=False)
+    fig.update_xaxes(row=2, title_text="Time in days", tickangle=45)
+    fig.update_yaxes(title_text="Electricity flow in kWh", **axis_settings)
+    fig.update_yaxes(row=2, title_text="Storage SOC", range=[0, 1])
+
+
+
+    return fig
+
 def reduced_demand_fig(results):
 
     results_demand_el = solph.views.node(results=results, node="electricity_demand")
@@ -906,6 +1041,14 @@ if __name__ == "__main__":
                 )
             ),
             html.Div(children=[html.H3("Results in numbers"), result_div]),
+            html.Div(
+             children=[
+                 html.H3("Electricity flow figure"),
+                 dcc.Graph(
+                     id="nc_electricity_flow", figure=electricity_flow_fig(results)
+                 ),
+             ]
+            ),
             html.Div(
                 children=[
                     html.H3("Non critical demand reduction overview"),
