@@ -42,7 +42,7 @@ def read_input_file(filename):
     name = "timeseries"
     headers = [c.value for c in wb[name][1]]
 
-    for hd in ("CriticalDemand", "Demand", "SolarGen"):
+    for hd in ("Demand", "SolarGen"):
         if hd not in headers:
             raise ValueError(
                 f"The column header '{hd}' is missing in your input file {filename} under the '{name}' sheet"

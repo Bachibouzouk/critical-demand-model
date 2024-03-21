@@ -105,7 +105,7 @@ def run_simulation(df_costs, data, settings):
     n_days_in_year = 365
 
     case = settings.case
-    demand_reduction_factor = settings.maximum_demand_reduction
+    demand_reduction_factor = 0.25 #settings.maximum_demand_reduction
 
     epc = df_costs["annuity"]
 
@@ -125,8 +125,8 @@ def run_simulation(df_costs, data, settings):
     # based on the selected simulation period.
     solar_potential = data.SolarGen.loc[start_datetime:end_datetime]
     hourly_demand = data.Demand.loc[start_datetime:end_datetime]
-    non_critical_demand = hourly_demand
-    critical_demand = data.CriticalDemand.loc[start_datetime:end_datetime]
+    non_critical_demand = hourly_demand * demand_reduction_factor
+    critical_demand = hourly_demand * (1-demand_reduction_factor)
     peak_solar_potential = solar_potential.max()
     peak_demand = hourly_demand.max()
 
@@ -242,7 +242,7 @@ def run_simulation(df_costs, data, settings):
     if case in (case_BPV, case_DBPV):
         battery = solph.components.GenericStorage(
             label="battery",
-            investment=solph.Investment(ep_costs=epc.battery * n_days / n_days_in_year),
+            investment=solph.Investment(ep_costs=110 * n_days / n_days_in_year),
             inputs={b_el_dc: solph.Flow(variable_costs=0.01)},# AA: might be replaced by user input's opex_fixed
             outputs={b_el_dc: solph.Flow(nominal_value=solph.Investment(ep_costs=0))},
             min_storage_level=settings.storage_soc_min,
@@ -257,14 +257,18 @@ def run_simulation(df_costs, data, settings):
         C_rate_discharge= 0.5
 
     # -------------------- SINKS (or DEMAND) --------------------
+    if non_critical_demand.max() == 0:
+        max_non_critical_demand = 1
+    else:
+        max_non_critical_demand = (non_critical_demand / non_critical_demand.max())
     demand_el = solph.components.Sink(
         label="electricity_demand",
         inputs={
             b_el_ac: solph.Flow(
-                min=(1 - demand_reduction_factor)
-                * (non_critical_demand / non_critical_demand.max()),
-                max=(non_critical_demand / non_critical_demand.max()),
+                min=0,
+                max=max_non_critical_demand,
                 nominal_value=non_critical_demand.max(),
+                variable_costs=1e-15
             )
         },
     )
@@ -550,6 +554,8 @@ def run_simulation(df_costs, data, settings):
     first_investment= asset_results.first_investment.sum()+  project_planning_cost
     overall_peak_demand = sequences_demand.max() + sequences_critical_demand.max()
 
+    # import ipdb;ipdb.set_trace()
+
     ##########################################################################
     # Print the results in the terminal
     ##########################################################################
@@ -638,7 +644,7 @@ def run_simulation(df_costs, data, settings):
         children=[
             html.Div(
                 children=[
-                    html.P(f"Peak Demand:\t {sequences_demand.max():.1f} kW"),
+                    html.P(f"Peak Demand:\t {overall_peak_demand:.1f} kW"),
                     html.P(f"LCOE:\t\t {lcoe:.2f} cent/kWh", title=help_lcoe),
                     html.P(f"First investment :\t\t {asset_results.first_investment.sum():.2f} USD", title="It is the sum of the product of optimized capacity and annualized costs of each asset"),
                     html.P(f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*CRF:.2f} USD/year"),
@@ -697,6 +703,7 @@ def reduced_demand_fig(results):
                 name="supplied non-critical demand",
                 stackgroup="d",
                 line_color="#DC267F",
+                mode="lines+markers"
             ),
             go.Scatter(
                 x=sequences_demand.index,
