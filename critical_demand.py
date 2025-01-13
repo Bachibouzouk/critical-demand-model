@@ -3,8 +3,7 @@
 """
 General description
 -------------------
-This example illustrates the combination of Investment and NonConvex options
-applied to a diesel generator in a hybrid mini-grid system.
+This example illustrates the concept of critical vs non-critical demand within a hybrid mini-grid system.
 
 There are the following components:
 
@@ -53,7 +52,9 @@ except ModuleNotFoundError:
     ES_GRAPH = False
 z_version = 1
 
-if solph.__version__[:3] != "0.5" or (solph.__version__[:3] == "0.5" and int(solph.__version__.split(".")[2]) < z_version):
+if solph.__version__[:3] != "0.5" or (
+    solph.__version__[:3] == "0.5" and int(solph.__version__.split(".")[2]) < z_version
+):
 
     raise Exception(
         f"Oemof solph version should be 0.5.{z_version} (current version {solph.__version__}) , please update oemof.solph with for example `pip install oemof.solph==0.5.{z_version}`"
@@ -73,28 +74,25 @@ RESULTS_COLUMN_NAMES = [
     "annual_costs",
     "total_flow",
     "capacity",
-    "cash_flow", # AA: could be named fuel_expenditure_cost
+    "cash_flow",  # AA: could be named fuel_expenditure_cost
     "total_opex_costs",
-    "first_investment"
+    "first_investment",
 ]
 ##########################################################################
 # Initialize the energy system and calculate necessary parameters
 ##########################################################################
 
-#AA: the model still read these inputs below, need to be read from input excel sheet!!
 
-def other_costs():
-    variable_cost_diesel_genset = 0.025  # currency/kWh #ADN: how caculated, doese included opex costs per kWh/a in ??
-    diesel_cost = 1  # currency/l
-    diesel_density = 0.846  # kg/l
-    diesel_lhv = 11.83  # kWh/kg
-    return variable_cost_diesel_genset, diesel_cost, diesel_density, diesel_lhv
+
+def diesel_cost(vol_cost, dens, energy_dens):
+    return vol_cost / dens / energy_dens
 
 
 case_D = "D"
 case_DBPV = "DBPV"
 case_BPV = "BPV"
 project_planning_cost = 5000
+
 
 def run_simulation(df_costs, data, settings):
 
@@ -108,6 +106,9 @@ def run_simulation(df_costs, data, settings):
     demand_reduction_factor = settings.maximum_demand_reduction
 
     epc = df_costs["annuity"]
+    opex_var = df_costs["opex_variable"].fillna(0)
+    diesel_lhv = df_costs["energy_density"].diesel_genset
+    diesel_density = df_costs["density"].diesel_genset
 
     # Change the index of data to be able to select data based on the time range.
     data.index = pd.date_range(start=start_date_obj, periods=len(data), freq="H")
@@ -130,9 +131,12 @@ def run_simulation(df_costs, data, settings):
     peak_solar_potential = solar_potential.max()
     peak_demand = hourly_demand.max()
 
-    variable_cost_diesel_genset, diesel_cost, diesel_density, diesel_lhv = other_costs()
     # Start time for calculating the total elapsed time.
     start_simulation_time = time.time()
+
+    ########################################
+    # ------- Set up energy system ------- #
+    ########################################
 
     energy_system = solph.EnergySystem(timeindex=date_time_index)
 
@@ -147,11 +151,7 @@ def run_simulation(df_costs, data, settings):
     if case in (case_D, case_DBPV):
         diesel_source = solph.components.Source(
             label="diesel_source",
-            outputs={
-                b_diesel: solph.Flow(
-                    variable_costs=diesel_cost / diesel_density / diesel_lhv
-                )
-            },
+            outputs={b_diesel: solph.Flow(variable_costs=opex_var.diesel_genset)},
         )
 
     if case in (case_BPV, case_DBPV):
@@ -166,7 +166,7 @@ def run_simulation(df_costs, data, settings):
                         * n_days
                         / n_days_in_year  # ADN:why not just put ep_costs=epc_PV??
                     ),
-                    variable_costs=0,
+                    variable_costs=opex_var.pv,
                 )
             },
         )
@@ -180,27 +180,27 @@ def run_simulation(df_costs, data, settings):
 
     diesel_genset_efficiency = 0.33
     if case in (case_D, case_DBPV):
-        min_load = 0.30
+        min_load = 0.20
         max_load = 1
         diesel_genset = solph.components.Converter(
             label="diesel_genset",
             inputs={b_diesel: solph.Flow()},
             outputs={
                 b_el_ac: solph.Flow(
-                    variable_costs=variable_cost_diesel_genset,
-                     min=min_load,
-                     max=max_load,
+                    variable_costs=opex_var.diesel_genset,
+                    min=min_load,
+                    max=max_load,
                     nominal_value=solph.Investment(
                         ep_costs=epc.diesel_genset * n_days / n_days_in_year,
                         maximum=2 * peak_demand,
-                        #minimum= 1.2*peak_demand,
+                        # minimum= 1.2*peak_demand,
                     ),
                     # nonconvex=solph.NonConvex(),
                 )
             },
             conversion_factors={b_el_ac: diesel_genset_efficiency},
         )
-    #import ipdb;ipdb.set_trace()
+
     # The rectifier assumed to have a fixed efficiency of 98%.
     # its cost already included in the PV cost investment
     rectifier = solph.components.Converter(
@@ -210,7 +210,7 @@ def run_simulation(df_costs, data, settings):
                 nominal_value=solph.Investment(
                     ep_costs=epc.rectifier * n_days / n_days_in_year
                 ),
-                variable_costs=5,
+                variable_costs=opex_var.rectifier,
             )
         },
         outputs={b_el_dc: solph.Flow()},
@@ -228,7 +228,7 @@ def run_simulation(df_costs, data, settings):
                 nominal_value=solph.Investment(
                     ep_costs=epc.inverter * n_days / n_days_in_year
                 ),
-                variable_costs=0, # has to be fits input sheet
+                variable_costs=opex_var.inverter,  # has to be fits input sheet
             )
         },
         outputs={b_el_ac: solph.Flow()},
@@ -243,7 +243,9 @@ def run_simulation(df_costs, data, settings):
         battery = solph.components.GenericStorage(
             label="battery",
             investment=solph.Investment(ep_costs=epc.battery * n_days / n_days_in_year),
-            inputs={b_el_dc: solph.Flow(variable_costs=0.01)},# AA: might be replaced by user input's opex_fixed
+            inputs={
+                b_el_dc: solph.Flow(variable_costs=0.01)
+            },
             outputs={b_el_dc: solph.Flow(nominal_value=solph.Investment(ep_costs=0))},
             min_storage_level=settings.storage_soc_min,
             max_storage_level=settings.storage_soc_max,
@@ -253,8 +255,6 @@ def run_simulation(df_costs, data, settings):
             invest_relation_input_capacity=1,
             invest_relation_output_capacity=0.5,  # fixes the input flow investment to the output flow investment
         )
-        C_rate_charge= 1
-        C_rate_discharge= 0.5
 
     # -------------------- SINKS (or DEMAND) --------------------
     demand_el = solph.components.Sink(
@@ -282,7 +282,7 @@ def run_simulation(df_costs, data, settings):
 
     excess_el = solph.components.Sink(
         label="excess_el",
-        inputs={b_el_dc: solph.Flow(variable_costs=1e9)},
+        inputs={b_el_dc: solph.Flow(variable_costs=0.01)},
     )
 
     energy_system.add(
@@ -295,7 +295,7 @@ def run_simulation(df_costs, data, settings):
         excess_el,
     )
 
-    # Add all objects to the energy system.
+    # Add extra objects to the energy system.
     if case == case_BPV:
         energy_system.add(
             pv,
@@ -318,8 +318,9 @@ def run_simulation(df_costs, data, settings):
             diesel_genset,
             b_diesel,
         )
+
     ##########################################################################
-    # Optimise the energy system
+    # ------------------ Optimise the energy system ------------------------ #
     ##########################################################################
 
     # The higher the MipGap or ratioGap, the faster the solver would converge,
@@ -327,14 +328,12 @@ def run_simulation(df_costs, data, settings):
     solver_option = {"gurobi": {"MipGap": "0.02"}, "cbc": {"ratioGap": "0.02"}}
     solver = "cbc"
 
-    # TODO command to show the graph, might not work on windows, one could comment those lines
-
     energy_system_graph = f"case_{case}.png"
-    #if ES_GRAPH is True:
-        #es = ESGraphRenderer(
-            #energy_system, legend=True, filepath=energy_system_graph, img_format="png"
-        #)
-        #es.render()
+    if ES_GRAPH is True:
+        es = ESGraphRenderer(
+            energy_system, legend=True, filepath=energy_system_graph, img_format="png"
+        )
+        es.render()
 
     model = solph.Model(energy_system)
     model.solve(
@@ -349,6 +348,7 @@ def run_simulation(df_costs, data, settings):
     print("\n" + 50 * "*")
     print(f"Simulation Time:\t {end_simulation_time-start_simulation_time:.2f} s")
 
+    ### ---------- RESULTS PROCESSING ---------- ###
     results = solph.processing.results(model)
 
     asset_results = df_costs.copy()
@@ -357,7 +357,7 @@ def run_simulation(df_costs, data, settings):
     asset_results["cash_flow"] = 0
 
     project_lifetime = 25
-    wacc = 0.11
+    wacc = settings.wacc
     CRF = annuity(1, project_lifetime, wacc)
 
     results_pv = solph.views.node(results=results, node="pv")
@@ -407,7 +407,7 @@ def run_simulation(df_costs, data, settings):
         )
 
         asset_results.loc["diesel_genset", "cash_flow"] = (
-            diesel_cost * sequences_diesel_consumption.sum()
+            opex_var.diesel_genset * sequences_diesel_consumption.sum()
         )
 
         # Hourly profiles for electricity production in the diesel genset.
@@ -492,7 +492,8 @@ def run_simulation(df_costs, data, settings):
 
     asset_results["total_opex_costs"] = asset_results.apply(
         lambda x: (x.opex_fix * x.capacity) * year_fraction
-        + x.total_flow * x.opex_variable + x. cash_flow,
+        + x.total_flow * x.opex_variable
+        + x.cash_flow,
         axis=1,
     )
 
@@ -500,23 +501,21 @@ def run_simulation(df_costs, data, settings):
     asset_results = asset_results[RESULTS_COLUMN_NAMES]
     asset_results.to_csv(f"results_{case}.csv")
 
-    NPV = ((asset_results.annual_costs.sum() + asset_results.cash_flow.sum()) / CRF) + project_planning_cost
+    NPV = (
+        (asset_results.annual_costs.sum() + asset_results.cash_flow.sum()) / CRF
+    ) + project_planning_cost
 
     # supplied demand
     total_demand = sequences_demand.sum(axis=0) + sequences_critical_demand.sum(axis=0)
-    Supplied_critical_demand = sequences_critical_demand.sum(axis=0)
-    Supplied_non_critical_demand = sequences_demand.sum(axis=0)
+    supplied_critical_demand = sequences_critical_demand.sum(axis=0)
+    supplied_non_critical_demand = sequences_demand.sum(axis=0)
 
     # Levelized cost of electricity in the system in currency's Cent per kWh.
     lcoe = 100 * (NPV * CRF) / total_demand
 
     if case == case_DBPV:
         # The share of renewable energy source used to cover the demand.
-        res = (
-            100
-            * sequences_pv.sum(axis=0)
-            / (sequences_diesel_genset.sum(axis=0) + sequences_pv.sum(axis=0))
-        )
+        res = 100 * (total_demand - sequences_diesel_genset.sum(axis=0)) / total_demand
     elif case == case_D:
         res = 0
     else:
@@ -547,12 +546,13 @@ def run_simulation(df_costs, data, settings):
     ) + non_critical_demand[sequences_demand.index].sum(axis=0)
 
     total_opex_costs = asset_results.total_opex_costs.sum()
-    first_investment= asset_results.first_investment.sum()+  project_planning_cost
+    first_investment = asset_results.first_investment.sum() + project_planning_cost
     overall_peak_demand = sequences_demand.max() + sequences_critical_demand.max()
 
     ##########################################################################
     # Print the results in the terminal
     ##########################################################################
+
     scalars = dict(
         lcoe=lcoe,
         npv=NPV,
@@ -609,14 +609,16 @@ def run_simulation(df_costs, data, settings):
     print(f"Overall Peak Demand:\t {overall_peak_demand:.0f} kW")
     print(f"LCOE:\t\t {lcoe:.2f} cent/kWh")
     print(f"NPV:\t\t {NPV:.2f} USD")
-    print(f"Total opex costs :\t\t {total_opex_costs:.2f} USD/year")
+    print(f"Total opex costs :\t\t {total_opex_costs:.2f} USD/{settings.n_days} days")
     print(f"First investment :\t\t {first_investment:.2f} USD")
-    print(f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*CRF:.2f} USD/year")
+    print(
+        f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*CRF:.2f} USD/{settings.n_days} days"
+    )
     print(f"RES:\t\t {res:.0f}%")
     print(f"Excess:\t\t {excess_rate:.1f}% of the total production")
     print(f"Supplied demand:\t\t {total_demand:.1f} kWh")
-    print(f"Supplied critical demand:\t\t {Supplied_critical_demand:.1f} kWh")
-    print(f"Supplied non critical demand:\t\t {Supplied_non_critical_demand:.1f} kWh")
+    print(f"Supplied critical demand:\t\t {supplied_critical_demand:.1f} kWh")
+    print(f"Supplied non critical demand:\t\t {supplied_non_critical_demand:.1f} kWh")
     print(f"Original demand:\t\t {original_demand:.1f} kWh")
     print(
         f"Share of critical demand fulfilled :\t\t {critical_demand_fulfilled:.0f}% of the total critical demand"
@@ -634,14 +636,23 @@ def run_simulation(df_costs, data, settings):
     print(f"Rectifier:\t {capacity_rectifier:.1f} kW")
     print(50 * "*")
 
+    ##############################################
+    # ------------ Set up DashApp -------------- #
+    ##############################################
+
     result_div = html.Div(
         children=[
             html.Div(
                 children=[
-                    html.P(f"Peak Demand:\t {sequences_demand.max():.1f} kW"),
+                    html.P(f"Overall peak Demand:\t {overall_peak_demand:.1f} kW"),
                     html.P(f"LCOE:\t\t {lcoe:.2f} cent/kWh", title=help_lcoe),
-                    html.P(f"First investment :\t\t {asset_results.first_investment.sum():.2f} USD", title="It is the sum of the product of optimized capacity and annualized costs of each asset"),
-                    html.P(f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*CRF:.2f} USD/year"),
+                    html.P(
+                        f"First investment :\t\t {asset_results.first_investment.sum():.2f} USD",
+                        title="It is the sum of the product of optimized capacity and annualized costs of each asset",
+                    ),
+                    html.P(
+                        f"Fuel expenditure :\t\t {asset_results.cash_flow.sum()*CRF:.2f} USD/{settings.n_days} days"
+                    ),
                     html.P(f"RES:\t\t {res:.0f}%"),
                     html.P(f"Excess:\t\t {excess_rate:.1f}% of the total production"),
                     html.P(
@@ -801,30 +812,52 @@ def sankey(energy_system, results, ts=None):
     return fig.to_dict()
 
 
+def plot_bus_flows(busses, results):
+    bus_figures = []
+
+    for bus in busses:
+        if bus != "battery":
+            fig = go.Figure(layout=dict(title=f"{bus} bus node"))
+            for t, g in solph.views.node(results, node=bus)["sequences"].items():
+                idx_asset = abs(t[0].index(bus) - 1)
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=g.index, y=g.values * pow(-1, idx_asset), name=t[0][idx_asset]
+                    )
+                )
+        else:
+            capacity_battery = asset_results.capacity.battery
+            if capacity_battery != 0:
+                soc_battery = (
+                    solph.views.node(results, node=bus)["sequences"][
+                        (("battery", "None"), "storage_content")
+                    ]
+                    / capacity_battery
+                )
+            else:
+                soc_battery = solph.views.node(results, node=bus)["sequences"][
+                    (("battery", "None"), "storage_content")
+                ]
+
+            fig = go.Figure(layout=dict(title=f"{bus} node"))
+
+            fig.add_trace(
+                go.Scatter(
+                    x=soc_battery.index, y=soc_battery.values, name="soc battery"
+                )
+            )
+
+        bus_figures.append(fig)
+    return bus_figures
+
+
 if __name__ == "__main__":
-    # Import data.
-    current_directory = os.path.dirname(os.path.abspath(__file__))
-
-    parser = argparse.ArgumentParser(
-        prog="python critical_demand.py",
-        description="Build a simple model with non critical demand",
-    )
-    parser.add_argument(
-        "-i",
-        dest="input_file",
-        nargs="?",
-        type=str,
-        help="path to the input file",
-        default=os.path.join(current_directory, "input_case.xlsx"),
-    )
-
-    args = vars(parser.parse_args())
-
-    filename = args.get("input_file")
+    filename = "input_case.xlsx"
 
     if not os.path.exists(filename):
         raise FileNotFoundError(
-            f"The file {f} was not found, make sure you you did not make a typo in its name or that the file is accessible from where you executed this code"
+            f"The file was not found, make sure you you did not make a typo in its name or that the file is accessible from where you executed this code"
         )
     df_costs, data, settings, _ = read_input_file(filename)
 
@@ -841,52 +874,21 @@ if __name__ == "__main__":
     case = settings.case
     energy_system_graph = encode_image_file(f"case_{case}.png")
 
-    bus_figures = []
     if case == case_D:
         busses = ["electricity_ac"]
     else:
         busses = ["electricity_ac", "electricity_dc", "battery"]
 
-    for bus in busses:
-        if bus != "battery":
-            fig = go.Figure(layout=dict(title=f"{bus} bus node"))
-            for t, g in solph.views.node(results, node=bus)["sequences"].items():
-                idx_asset = abs(t[0].index(bus) - 1)
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=g.index, y=g.values * pow(-1, idx_asset), name=t[0][idx_asset]
-                    )
-                )
-        else:
-            capacity_battery = asset_results.capacity.battery
-            if capacity_battery != 0:
-                soc_battery = solph.views.node(results, node=bus)["sequences"][
-                                  (("battery", "None"), "storage_content")] / capacity_battery
-            else:
-                soc_battery = solph.views.node(results, node=bus)["sequences"][
-                    (("battery", "None"), "storage_content")]
-
-            fig = go.Figure(layout=dict(title=f"{bus} node"))
-
-            fig.add_trace(
-                go.Scatter(
-                    x=soc_battery.index, y=soc_battery.values, name="soc battery"
-                )
-            )
-
-        bus_figures.append(fig)
-
-    # only in case of battery --> WHY DOESN#T it WORK???
-    if case != case_D:
-        bus = "battery"
-
+    # plot bus flows
+    bus_figures = plot_bus_flows(busses, results)
 
     # loading external resources
     external_stylesheets = ["https://codepen.io/chriddyp/pen/bWLwgP.css"]
     options = dict(
         # external_stylesheets=external_stylesheets
     )
+
+    ######### --------- Dash app layout ---------- ###
 
     demo_app = dash.Dash(__name__, **options)
 
@@ -981,7 +983,7 @@ if __name__ == "__main__":
         Input(component_id="ts_slice_select", component_property="value"),
     )
     def update_figures(ts):
-        ts = int(ts)
+        ts = int(ts) if ts is not None else 0
         # see if case changes, otherwise do not rerun this
         date_time_index = energy_system.timeindex
 
@@ -1017,7 +1019,10 @@ if __name__ == "__main__":
 
                     fig.add_trace(
                         go.Scatter(
-                            x=g.index, y=g.values * negative_sign, name=asset_name, **opts
+                            x=g.index,
+                            y=g.values * negative_sign,
+                            name=asset_name,
+                            **opts,
                         )
                     )
                     if g.max() > max_y:
@@ -1025,13 +1030,18 @@ if __name__ == "__main__":
             else:
                 capacity_battery = asset_results.capacity.battery
                 if capacity_battery != 0:
-                    soc_battery = solph.views.node(results, node=bus)["sequences"][
-                                      (("battery", "None"), "storage_content")] / capacity_battery
+                    soc_battery = (
+                        solph.views.node(results, node=bus)["sequences"][
+                            (("battery", "None"), "storage_content")
+                        ]
+                        / capacity_battery
+                    )
                 else:
                     soc_battery = solph.views.node(results, node=bus)["sequences"][
-                        (("battery", "None"), "storage_content")]
+                        (("battery", "None"), "storage_content")
+                    ]
 
-                fig = go.Figure(layout=dict(title=f"{bus} node", yaxis_range=[0,1]))
+                fig = go.Figure(layout=dict(title=f"{bus} node", yaxis_range=[0, 1]))
 
                 fig.add_trace(
                     go.Scatter(
@@ -1040,12 +1050,16 @@ if __name__ == "__main__":
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=soc_battery.index, y=np.ones(len(soc_battery.index))*settings.storage_soc_min, name="min soc battery"
+                        x=soc_battery.index,
+                        y=np.ones(len(soc_battery.index)) * settings.storage_soc_min,
+                        name="min soc battery",
                     )
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=soc_battery.index, y=np.ones(len(soc_battery.index))*settings.storage_soc_max, name="max soc battery"
+                        x=soc_battery.index,
+                        y=np.ones(len(soc_battery.index)) * settings.storage_soc_max,
+                        name="max soc battery",
                     )
                 )
             fig.add_trace(
@@ -1072,5 +1086,4 @@ if __name__ == "__main__":
     def change_ts_value(val):
         return val
 
-    demo_app.run_server(debug=True, port=settings.port)
-    #import ipdb;ipdb.set_trace()
+    demo_app.run_server(debug=True, port=settings.port, use_reloader=False)
