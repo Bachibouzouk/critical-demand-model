@@ -1,0 +1,43 @@
+digraph {
+	subgraph cluster_1 {
+		color=black
+		label=Legends
+		Bus [color=lightgrey fixedsize=shape fontsize=10 height=0.3 shape=rectangle style=filled width=4.1]
+		Sink [fontsize=10 shape=trapezium]
+		Source [fontsize=10 shape=invtrapezium]
+		"Transforme
+r" [fontsize=10 shape=rectangle]
+		Storage [fontsize=10 shape=rectangle style=rounded]
+	}
+	electricity_dc [color=lightgrey fixedsize=shape fontsize=10 height=0.3 shape=rectangle style=filled width=4.1]
+	electricity_ac [color=lightgrey fixedsize=shape fontsize=10 height=0.3 shape=rectangle style=filled width=4.1]
+	inverter [fontsize=10 shape=rectangle]
+	rectifier [fontsize=10 shape=rectangle]
+	"electricit
+y_demand" [fontsize=10 shape=trapezium]
+	"electricit
+y_critical
+_demand" [fontsize=10 shape=trapezium]
+	excess_el [fontsize=10 shape=trapezium]
+	"diesel_sou
+rce" [fontsize=10 shape=invtrapezium]
+	"diesel_gen
+set" [fontsize=10 shape=rectangle]
+	diesel [color=lightgrey fixedsize=shape fontsize=10 height=0.3 shape=rectangle style=filled width=4.1]
+	rectifier -> electricity_dc
+	electricity_dc -> inverter
+	electricity_dc -> excess_el
+	inverter -> electricity_ac
+	"diesel_gen
+set" -> electricity_ac
+	electricity_ac -> rectifier
+	electricity_ac -> "electricit
+y_demand"
+	electricity_ac -> "electricit
+y_critical
+_demand"
+	"diesel_sou
+rce" -> diesel
+	diesel -> "diesel_gen
+set"
+}

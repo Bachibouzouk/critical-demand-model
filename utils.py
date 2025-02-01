@@ -118,7 +118,7 @@ def encode_image_file(img_path):
 
 
 def annualized_capex(
-    investment_t0, project_lifetime, asset_lifetime=None, wacc=0.08, tax=0
+    investment_t0, project_lifetime, asset_lifetime=None, wacc=0.11, tax=0
 ):
     """Return output of capex_from_investment annualised"""
     capex = capex_from_investment(
@@ -128,7 +128,7 @@ def annualized_capex(
 
 
 def capex_from_investment(
-    investment_t0, project_lifetime, asset_lifetime=None, wacc=0.09, tax=0
+    investment_t0, project_lifetime, asset_lifetime=None, wacc=0.11, tax=0
 ):
     """
 
