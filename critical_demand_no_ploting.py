@@ -550,7 +550,7 @@ def run_simulation(df_costs, data, settings):
     overall_peak_demand = sequences_demand.max() + sequences_critical_demand.max()
 
     #fuel_co2_emission_factor = 2.68 kgCO2eq/l
-    #fuel_co2_emission_factor= (sequences_diesel_consumption.sum() * 2.68)/1000
+    fuel_co2_emission_factor= (sequences_diesel_consumption.sum() * 2.68)/1000
 
     ##########################################################################
     # Print the results in the terminal

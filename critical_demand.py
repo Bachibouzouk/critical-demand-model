@@ -121,7 +121,7 @@ def run_simulation(df_costs, data, settings):
     # based on the selected simulation period.
     solar_potential = data.SolarGen.loc[start_datetime:end_datetime]
     hourly_demand = data.Demand.loc[start_datetime:end_datetime]
-    non_critical_demand = hourly_demand
+    non_critical_demand = hourly_demand * (1 - demand_reduction_factor)
     critical_demand = data.CriticalDemand.loc[start_datetime:end_datetime]
     peak_solar_potential = solar_potential.max()
     peak_demand = hourly_demand.max()
@@ -551,7 +551,10 @@ def run_simulation(df_costs, data, settings):
     overall_peak_demand = sequences_demand.max() + sequences_critical_demand.max()
 
     #fuel_co2_emission_factor = 2.68 kgCO2eq/l
-    #fuel_co2_emission_factor= (sequences_diesel_consumption.sum() * 2.68)/1000
+    if case in (case_D, case_DBPV):  # Diesel is used in these cases
+        fuel_co2_emission_factor = (sequences_diesel_consumption.sum() * 2.68) / 1000
+    else:  # No diesel is used in BPV case
+        fuel_co2_emission_factor = 0
 
     ##########################################################################
     # Print the results in the terminal
@@ -627,7 +630,7 @@ def run_simulation(df_costs, data, settings):
     print(f"First investment :\t\t {first_investment:.2f} USD")
     print(f"Total opex costs :\t\t {total_opex_costs:.2f} USD/year")
     print(f"LCOE:\t\t {lcoe:.2f} USD/kWh")
-    #print(f"Co2 emission:\t\t {fuel_co2_emission_factor:.1f} tons")
+    print(f"Co2 emission:\t\t {fuel_co2_emission_factor:.1f} tons")
     print(f"NPV:\t\t {NPV:.2f} USD")
     print(50 * "*")
     print("Optimal Capacities:")
@@ -683,33 +686,40 @@ def run_simulation(df_costs, data, settings):
         critical_demand,
     )
 
-
+#begings code
 def electricity_flow_fig(results):
-
     sequences = solph.views.convert_keys_to_strings(results)
 
+    # Safe retrieval of sequences
     sequences_demand = sequences[("electricity_ac", "electricity_demand")]["sequences"]
     sequences_critical_demand = sequences[("electricity_ac", "electricity_critical_demand")]["sequences"]
-    sequences_pv = sequences[("pv", "electricity_dc")]["sequences"]
-    sequences_charge = sequences[("electricity_dc", "battery")]["sequences"]
-    sequences_discharge = sequences[("battery", "electricity_dc")]["sequences"]
-    sequences_diesel_genset = sequences[("diesel_genset", "electricity_ac")]["sequences"]
-    sequences_excess_el = sequences[("electricity_ac", "excess_el")]["sequences"]
-    sequences_soc = sequences[("battery", "None")]["sequences"]
-    battery_capacity = sequences[("battery", "None")]["scalars"].invest
+    #sequences_diesel_genset = sequences[("diesel_genset", "electricity_ac")]["sequences"]
+    # Safely retrieve diesel genset sequences
+    sequences_diesel_genset = sequences.get(("diesel_genset", "electricity_ac"), {}).get("sequences", None)
+
+    sequences_excess_el = sequences.get(("electricity_ac", "excess_el"), {}).get("sequences", None)
+
+    # Conditional retrieval for PV and battery
+    sequences_pv = sequences.get(("pv", "electricity_dc"), {}).get("sequences", None)
+    sequences_charge = sequences.get(("electricity_dc", "battery"), {}).get("sequences", None)
+    sequences_discharge = sequences.get(("battery", "electricity_dc"), {}).get("sequences", None)
+    sequences_soc = sequences.get(("battery", "None"), {}).get("sequences", None)
+    battery_capacity = sequences.get(("battery", "None"), {}).get("scalars", {}).get("invest", 1)
 
     line_shape = "vh"
     fig = make_subplots(rows=2, cols=1)
+
+    # Add traces for critical and non-critical demand
     fig.add_trace(
         go.Scatter(
             x=sequences_demand.flow.index,
             y=sequences_critical_demand.flow.values,
             name="critical demand",
             line_color="#f72a2a",
-            line_shape=line_shape
+            line_shape=line_shape,
         ),
         row=1,
-        col=1
+        col=1,
     )
     fig.add_trace(
         go.Scatter(
@@ -717,107 +727,123 @@ def electricity_flow_fig(results):
             y=sequences_demand.flow.values,
             name="non-critical demand",
             line_color="#4ecf32",
-            line_shape=line_shape
+            line_shape=line_shape,
         ),
         row=1,
-        col=1
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=sequences_demand.flow.index,
-            y=sequences_pv.flow.values,
-            name="PV generation",
-            line_color="#cbd62d",
-            line_shape=line_shape
-        ),
-        row=1,
-        col=1
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=sequences_demand.flow.index,
-            y=sequences_charge.flow.values,
-            name="storage charge",
-            line_color="#2899a6",
-            line_shape=line_shape
-        ),
-        row=1,
-        col=1
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=sequences_demand.flow.index,
-            y=sequences_discharge.flow.values,
-            name="storage discharge",
-            line_color="#1364d6",
-            line_shape=line_shape
-        ),
-        row=1,
-        col=1
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=sequences_demand.flow.index,
-            y=sequences_diesel_genset.flow.values,
-            name="diesel genset generation",
-            line_color="#050505",
-            line_shape=line_shape
-        ),
-        row=1,
-        col=1
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=sequences_demand.flow.index,
-            y=sequences_excess_el.flow.values,
-            name="Excess generation",
-            line_color="#964B00",
-            line_shape=line_shape
-        ),
-        row=1,
-        col=1
+        col=1,
     )
 
-    fig.add_trace(
-        go.Scatter(
-            x=sequences_soc.index,
-            y=sequences_soc.storage_content.values/battery_capacity,
-            line_color="#2596be",
-            showlegend=False,
-            line_shape=line_shape
-        ),
-        row=2,
-        col=1
-    )
+    # Add PV generation trace only if it exists
+    if sequences_pv is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=sequences_demand.flow.index,
+                y=sequences_pv.flow.values,
+                name="PV generation",
+                line_color="#cbd62d",
+                line_shape=line_shape,
+            ),
+            row=1,
+            col=1,
+        )
+
+    # Add storage charge and discharge traces only if they exist
+    if sequences_charge is not None and sequences_discharge is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=sequences_demand.flow.index,
+                y=sequences_charge.flow.values,
+                name="storage charge",
+                line_color="#2899a6",
+                line_shape=line_shape,
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=sequences_demand.flow.index,
+                y=sequences_discharge.flow.values,
+                name="storage discharge",
+                line_color="#1364d6",
+                line_shape=line_shape,
+            ),
+            row=1,
+            col=1,
+        )
+
+    # Add diesel genset generation trace
+    # Add diesel genset trace only if it exists
+    if sequences_diesel_genset is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=sequences_demand.flow.index,
+                y=sequences_diesel_genset.flow.values,
+                name="diesel genset generation",
+                line_color="#050505",
+                line_shape=line_shape,
+            ),
+            row=1,
+            col=1,
+        )
+
+    # Add excess electricity trace only if it exists
+    if sequences_excess_el is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=sequences_demand.flow.index,
+                y=sequences_excess_el.flow.values,
+                name="Excess generation",
+                line_color="#964B00",
+                line_shape=line_shape,
+            ),
+            row=1,
+            col=1,
+        )
+
+    # Add state of charge (SOC) trace for the battery only if it exists
+    if sequences_soc is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=sequences_soc.index,
+                y=sequences_soc.storage_content.values / battery_capacity,
+                line_color="#2596be",
+                showlegend=False,
+                line_shape=line_shape,
+            ),
+            row=2,
+            col=1,
+        )
+
     layout = dict(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         height=1000,
         width=1200,
     )
 
-
     fig.update_layout(**layout)
     axis_settings = dict(
         mirror=True,
-        ticks='outside',
+        ticks="outside",
         tickwidth=1.5,
         showline=True,
         linewidth=1.5,
-        linecolor='black',
-        zeroline=True, zerolinewidth=1.5, zerolinecolor='black',
-
+        linecolor="black",
+        zeroline=True,
+        zerolinewidth=1.5,
+        zerolinecolor="black",
     )
-    fig.update_xaxes(range=[sequences_soc.index[0], sequences_soc.index[8*24]], **axis_settings)
-    fig.update_xaxes(row=1,showticklabels=False)
+    fig.update_xaxes(range=[sequences_demand.flow.index[0], sequences_demand.flow.index[8 * 24]], **axis_settings)
+    fig.update_xaxes(row=1, title_text="Time in days", tickangle=45)
     fig.update_xaxes(row=2, title_text="Time in days", tickangle=45)
     fig.update_yaxes(title_text="Electricity flow in kWh", **axis_settings)
     fig.update_yaxes(row=2, title_text="Storage SOC", range=[0, 1])
 
-
-
     return fig
 
+
+## I adjust tgis fuction to run the plot
 def reduced_demand_fig(results):
 
     results_demand_el = solph.views.node(results=results, node="electricity_demand")
