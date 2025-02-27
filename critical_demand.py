@@ -52,7 +52,6 @@ try:
 except ModuleNotFoundError:
     ES_GRAPH = False
 
-
 import dash
 from dash import dcc
 from dash import html
@@ -121,7 +120,7 @@ def run_simulation(df_costs, data, settings):
     # based on the selected simulation period.
     solar_potential = data.SolarGen.loc[start_datetime:end_datetime]
     hourly_demand = data.Demand.loc[start_datetime:end_datetime]
-    non_critical_demand = hourly_demand * (1 - demand_reduction_factor)
+    non_critical_demand = hourly_demand 
     critical_demand = data.CriticalDemand.loc[start_datetime:end_datetime]
     peak_solar_potential = solar_potential.max()
     peak_demand = hourly_demand.max()
@@ -843,7 +842,7 @@ def electricity_flow_fig(results):
     return fig
 
 
-## I adjust tgis fuction to run the plot
+## I adjust this fuction to run the plot
 def reduced_demand_fig(results):
 
     results_demand_el = solph.views.node(results=results, node="electricity_demand")
@@ -1003,6 +1002,22 @@ if __name__ == "__main__":
         non_critical_demand,
         critical_demand,
     ) = run_simulation(df_costs, data, settings)
+    import plotly.io as pio
+
+    # Generate the electricity flow figure
+    fig = electricity_flow_fig(results)
+
+    # Set background color to white
+    fig.update_layout(
+        paper_bgcolor="white",  # White background
+        plot_bgcolor="white"  # White plot background
+    )
+
+    # Save the figure as high-resolution JPG
+    fig.write_image("electricity_flow.jpg", scale=3, format="jpg")
+
+    print("Electricity flow figure saved as a JPG with a white background.")
+
     case = settings.case
     energy_system_graph = encode_image_file(f"case_{case}.png")
 
